@@ -25,7 +25,22 @@ HTML_TEMPLATE = """
         .comment {{ color: {comment_color}; }}
         a {{ color: {link_color}; text-decoration: none; }}
         a:hover {{ text-decoration: underline; }}
-        pre {{ white-space: pre-wrap; }}
+        pre {{ white-space: pre-wrap; margin: 0; }}
+        .line-container {{ 
+            display: flex; 
+            align-items: flex-start; 
+            line-height: 1.0; 
+            margin-bottom: -0.8em; 
+        }}
+        .line-number {{ 
+            display: inline-block; 
+            width: 40px; 
+            text-align: right; 
+            padding-right: 10px; 
+            color: gray; 
+            user-select: none; 
+        }}
+        .code-line {{ display: inline; }}
     </style>
 </head>
 <body>
@@ -109,16 +124,24 @@ def create_links(content, class_map, input_dir, output_dir, current_file):
     return content
 
 def convert_file(file_path, class_map, input_dir, output_dir):
-    """Convert a single Java file to HTML."""
+    """Convert a single Java file to HTML with line numbers."""
     with open(file_path, 'r', encoding='utf-8') as f:
-        content = f.read()
+        lines = f.readlines()
 
-    # Escape HTML characters
-    content = escape_html(content)
-    # Process comments
-    content = process_comments(content)
-    # Add links to class references
-    content = create_links(content, class_map, input_dir, output_dir, file_path)
+    # Process each line and add line numbers
+    content_lines = []
+    for i, line in enumerate(lines, 1):
+        # Escape HTML characters
+        line_content = escape_html(line.rstrip('\n'))
+        # Process comments
+        line_content = process_comments(line_content)
+        # Add links to class references
+        line_content = create_links(line_content, class_map, input_dir, output_dir, file_path)
+        # Wrap line number and content in a flex container
+        content_lines.append(f'<div class="line-container"><span class="line-number">{i}</span><span class="code-line">{line_content}</span></div>')
+    
+    # Join lines with newlines
+    content = '\n'.join(content_lines)
 
     # Create HTML file
     output_file = file_path.replace(input_dir, output_dir).replace('.java', '.html')
