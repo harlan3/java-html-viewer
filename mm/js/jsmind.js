@@ -138,7 +138,7 @@
     jm.event_type = { show: 1, resize: 2, edit: 3, select: 4 };
     jm.key = { meta: 1 << 13, ctrl: 1 << 12, alt: 1 << 11, shift: 1 << 10 };
 
-    jm.node = function (sId, iIndex, sTopic, sLink, sFomLineNumber, oData, bIsRoot, oParent, eDirection, bExpanded) {
+    jm.node = function (sId, iIndex, sTopic, sLink, oData, bIsRoot, oParent, eDirection, bExpanded) {
         if (!sId) { logger.error('invalid node id'); return; }
         if (typeof iIndex != 'number') { logger.error('invalid node index'); return; }
         if (typeof bExpanded === 'undefined') { bExpanded = true; }
@@ -146,7 +146,6 @@
         this.index = iIndex;
         this.topic = sTopic;
         this.link = sLink;
-        this.fomlinenumber = sFomLineNumber;
         this.data = oData || {};
         this.isroot = bIsRoot;
         this.parent = oParent;
@@ -237,9 +236,9 @@
             }
         },
 
-        set_root: function (nodeid, topic, link, fomlinenumber, data) {
+        set_root: function (nodeid, topic, link, data) {
             if (this.root == null) {
-                this.root = new jm.node(nodeid, 0, topic, link, fomlinenumber, data, true);
+                this.root = new jm.node(nodeid, 0, topic, link, data, true);
                 this._put_node(this.root);
                 return this.root;
             } else {
@@ -248,13 +247,13 @@
             }
         },
 
-        add_node: function (parent_node, nodeid, topic, link, fomlinenumber, data, direction, expanded, idx) {
+        add_node: function (parent_node, nodeid, topic, link, data, direction, expanded, idx) {
             if (!jm.util.is_node(parent_node)) {
                 logger.error('the parent_node ' + parent_node + ' is not a node.');
                 return null;
             }
             var node_index = idx || -1;
-            var node = new jm.node(nodeid, node_index, topic, link, fomlinenumber, data, false, parent_node, parent_node.direction, expanded);
+            var node = new jm.node(nodeid, node_index, topic, link, data, false, parent_node, parent_node.direction, expanded);
             if (parent_node.isroot) {
                 node.direction = direction || jm.direction.right;
             }
@@ -274,7 +273,7 @@
                 return null;
             }
             var node_index = node_before.index - 0.5;
-            return this.add_node(node_before.parent, nodeid, topic, link, fomlinenumber, data, direction, true, node_index);
+            return this.add_node(node_before.parent, nodeid, topic, link, data, direction, true, node_index);
         },
 
         get_node_before: function (node) {
@@ -302,7 +301,7 @@
                 return null;
             }
             var node_index = node_after.index + 0.5;
-            return this.add_node(node_after.parent, nodeid, topic, link, fomlinenumber, data, direction, true, node_index);
+            return this.add_node(node_after.parent, nodeid, topic, link, data, direction, true, node_index);
         },
 
         get_node_after: function (node) {
@@ -500,7 +499,7 @@
             _parse: function (mind, node_root) {
                 var df = jm.format.node_tree;
                 var data = df._extract_data(node_root);
-                mind.set_root(node_root.id, node_root.topic, node_root.link, node_root.fomlinenumber, data);
+                mind.set_root(node_root.id, node_root.topic, node_root.link, data);
                 if ('children' in node_root) {
                     var children = node_root.children;
                     for (var i = 0; i < children.length; i++) {
@@ -512,7 +511,7 @@
             _extract_data: function (node_json) {
                 var data = {};
                 for (var k in node_json) {
-                    if (k == 'id' || k == 'topic' || k == 'link' || k == 'fomlinenumber' || k == 'children' || k == 'direction' || k == 'expanded') {
+                    if (k == 'id' || k == 'topic' || k == 'link' || k == 'children' || k == 'direction' || k == 'expanded') {
                         continue;
                     }
                     data[k] = node_json[k];
@@ -527,7 +526,7 @@
                 if (node_parent.isroot) {
                     d = node_json.direction == 'left' ? jm.direction.left : jm.direction.right;
                 }
-                var node = mind.add_node(node_parent, node_json.id, node_json.topic, node_json.link, node_json.fomlinenumber, data, d, node_json.expanded);
+                var node = mind.add_node(node_parent, node_json.id, node_json.topic, node_json.link, data, d, node_json.expanded);
                 if (!!node_json['children']) {
                     var children = node_json.children;
                     for (var i = 0; i < children.length; i++) {
@@ -543,7 +542,6 @@
                     id: node.id,
                     topic: node.topic,
                     link: node.link,
-                    fomlinenumber: node.fomlinenumber,
                     expanded: node.expanded
                 };
                 if (!!node.parent && node.parent.isroot) {
@@ -623,7 +621,7 @@
                     if ('isroot' in node_array[i] && node_array[i].isroot) {
                         var root_json = node_array[i];
                         var data = df._extract_data(root_json);
-                        var node = mind.set_root(root_json.id, root_json.topic, root_json.link, root_json.fomlinenumber, data);
+                        var node = mind.set_root(root_json.id, root_json.topic, root_json.link, data);
                         node_array.splice(i, 1);
                         return node;
                     }
@@ -646,7 +644,7 @@
                         if (!!node_direction) {
                             d = node_direction == 'left' ? jm.direction.left : jm.direction.right;
                         }
-                        var node = mind.add_node(parent_node, node_json.id, node_json.topic, node_json.link, node_json.fomlinenumber, data, d, node_json.expanded);
+                        var node = mind.add_node(parent_node, node_json.id, node_json.topic, node_json.link, data, d, node_json.expanded);
                         node_array.splice(i, 1);
                         extract_count++;
                         var sub_extract_count = df._extract_subnode(mind, node, node_array);
@@ -683,7 +681,6 @@
                     id: node.id,
                     topic: node.topic,
                     link: node.link,
-                    fomlinenumber: node.fomlinenumber,
                     expanded: node.expanded
                 };
                 if (!!node.parent) {
@@ -793,7 +790,6 @@
                 var node_id = xml_node.getAttribute('ID');
                 var node_topic = xml_node.getAttribute('TEXT');
                 var node_link = xml_node.getAttribute('LINK');
-                var node_fomlinenumber = xml_node.getAttribute('FOM_LINE_NUMBER');
                 var node_folded = xml_node.getAttribute('FOLDED');
                 // look for richcontent
                 if (node_topic == null) {
@@ -820,9 +816,9 @@
                 //logger.debug(node_position +':'+ node_direction);
                 var node = null;
                 if (!!parent_node) {
-                    node = mind.add_node(parent_node, node_id, node_topic, node_link, node_fomlinenumber, node_data, node_direction, node_expanded);
+                    node = mind.add_node(parent_node, node_id, node_topic, node_link, node_data, node_direction, node_expanded);
                 } else {
-                    node = mind.set_root(node_id, node_topic, node_link, node_fomlinenumber, node_data);
+                    node = mind.set_root(node_id, node_topic, node_link, node_data);
                 }
                 var children = xml_node.childNodes;
                 var child = null;
@@ -860,7 +856,6 @@
                 }
                 xmllines.push('TEXT=\"' + node.topic + '\"');
                 xmllines.push('LINK=\"' + node.link + '\">');
-                xmllines.push('FOM_LINE_NUMBER=\"' + node.fomlinenumber + '\">');
                 xmllines.push('FOLDED=\"' + !node.expanded + '\">');
 
                 // for attributes
@@ -1320,21 +1315,21 @@
             return this.mind.get_node(node);
         },
 
-        add_node: function (parent_node, nodeid, topic, link, fomlinenumber, data, direction) {
+        add_node: function (parent_node, nodeid, topic, link, data, direction) {
             if (this.get_editable()) {
                 var the_parent_node = this.get_node(parent_node);
                 var dir = jm.direction.of(direction)
                 if (dir === undefined) {
                     dir = this.layout.calculate_next_child_direction(the_parent_node);
                 }
-                var node = this.mind.add_node(the_parent_node, nodeid, topic, link, fomlinenumber, data, dir);
+                var node = this.mind.add_node(the_parent_node, nodeid, topic, link, data, dir);
                 if (!!node) {
                     this.view.add_node(node);
                     this.layout.layout();
                     this.view.show(false);
                     this.view.reset_node_custom_style(node);
                     this.expand_node(the_parent_node);
-                    this.invoke_event_handle(jm.event_type.edit, { evt: 'add_node', data: [the_parent_node.id, nodeid, topic, link, fomlinenumber, data, dir], node: nodeid });
+                    this.invoke_event_handle(jm.event_type.edit, { evt: 'add_node', data: [the_parent_node.id, nodeid, topic, link, data, dir], node: nodeid });
                 }
                 return node;
             } else {
