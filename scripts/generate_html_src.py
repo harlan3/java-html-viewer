@@ -30,7 +30,7 @@ HTML_TEMPLATE = """
             display: flex; 
             align-items: flex-start; 
             line-height: 1.0; 
-            margin-bottom: -0.8em; 
+            margin-bottom: -0.8em;
         }}
         .line-number {{ 
             display: inline-block; 
@@ -87,13 +87,9 @@ def escape_html(text):
     """Escape HTML special characters."""
     return html.escape(text)
 
-def process_comments(content):
-    """Wrap comments in a span with comment class."""
-    # Handle block comments
-    content = re.sub(r'(/\*.*?\*/)', r'<span class="comment">\1</span>', content, flags=re.DOTALL)
-    # Handle single-line comments
-    content = re.sub(r'(//[^\n]*)', r'<span class="comment">\1</span>', content)
-    return content
+def process_single_line_comments(line):
+    """Wrap single-line comments in a span with comment class."""
+    return re.sub(r'(//[^\n]*)', r'<span class="comment">\1</span>', line)
 
 def create_links(content, class_map, input_dir, output_dir, current_file):
     """Add hyperlinks to class references with correct relative paths, considering packages."""
@@ -128,18 +124,114 @@ def convert_file(file_path, class_map, input_dir, output_dir):
     with open(file_path, 'r', encoding='utf-8') as f:
         lines = f.readlines()
 
-    # Process each line and add line numbers
     content_lines = []
-    for i, line in enumerate(lines, 1):
-        # Escape HTML characters
-        line_content = escape_html(line.rstrip('\n'))
-        # Process comments
-        line_content = process_comments(line_content)
-        # Add links to class references
-        line_content = create_links(line_content, class_map, input_dir, output_dir, file_path)
-        # Wrap line number and content in a flex container
-        content_lines.append(f'<div class="line-container"><span class="line-number">{i}</span><span class="code-line">{line_content}</span></div>')
-    
+    in_block_comment = False
+    line_number = 1
+
+    for line in lines:
+        line_content = line.rstrip('\n')
+        remaining_content = line_content
+
+        while remaining_content:
+            if in_block_comment:
+                # Look for end of block comment
+                end_match = re.search(r'(.*?)\*/', remaining_content)
+                if end_match:
+                    # Found end of block comment
+                    comment_part = end_match.group(1) + '*/'
+                    escaped_comment = escape_html(comment_part)
+                    comment_content = process_single_line_comments(escaped_comment)
+                    comment_content = create_links(comment_content, class_map, input_dir, output_dir, file_path)
+                    content_lines.append(
+                        f'<div class="line-container"><span class="line-number">{line_number}</span>'
+                        f'<span class="code-line"><span class="comment">{comment_content}</span></span></div>'
+                    )
+                    in_block_comment = False
+                    # Process remaining content after */
+                    remaining_content = remaining_content[end_match.end():]
+                    if remaining_content:
+                        escaped_line = escape_html(remaining_content)
+                        line_content_processed = process_single_line_comments(escaped_line)
+                        line_content_processed = create_links(line_content_processed, class_map, input_dir, output_dir, file_path)
+                        content_lines.append(
+                            f'<div class="line-container"><span class="line-number">{line_number}</span>'
+                            f'<span class="code-line">{line_content_processed}</span></div>'
+                        )
+                    line_number += 1
+                else:
+                    # Entire line is part of block comment
+                    escaped_line = escape_html(remaining_content)
+                    comment_content = process_single_line_comments(escaped_line)
+                    comment_content = create_links(comment_content, class_map, input_dir, output_dir, file_path)
+                    content_lines.append(
+                        f'<div class="line-container"><span class="line-number">{line_number}</span>'
+                        f'<span class="code-line"><span class="comment">{comment_content}</span></span></div>'
+                    )
+                    line_number += 1
+                    remaining_content = ""
+            else:
+                # Look for start of block comment
+                start_match = re.search(r'(/\*\*?)', remaining_content)
+                if start_match:
+                    # Process content before /*
+                    pre_comment = remaining_content[:start_match.start()]
+                    if pre_comment:
+                        escaped_pre_comment = escape_html(pre_comment)
+                        pre_comment_content = process_single_line_comments(escaped_pre_comment)
+                        pre_comment_content = create_links(pre_comment_content, class_map, input_dir, output_dir, file_path)
+                        content_lines.append(
+                            f'<div class="line-container"><span class="line-number">{line_number}</span>'
+                            f'<span class="code-line">{pre_comment_content}</span></div>'
+                        )
+                        line_number += 1
+                    # Start block comment
+                    in_block_comment = True
+                    remaining_content = remaining_content[start_match.start():]
+                    # Check if */ is on the same line
+                    end_match = re.search(r'(.*?)\*/', remaining_content)
+                    if end_match:
+                        comment_part = end_match.group(1) + '*/'
+                        escaped_comment = escape_html(comment_part)
+                        comment_content = process_single_line_comments(escaped_comment)
+                        comment_content = create_links(comment_content, class_map, input_dir, output_dir, file_path)
+                        content_lines.append(
+                            f'<div class="line-container"><span class="line-number">{line_number}</span>'
+                            f'<span class="code-line"><span class="comment">{comment_content}</span></span></div>'
+                        )
+                        in_block_comment = False
+                        remaining_content = remaining_content[end_match.end():]
+                        if remaining_content:
+                            escaped_line = escape_html(remaining_content)
+                            line_content_processed = process_single_line_comments(escaped_line)
+                            line_content_processed = create_links(line_content_processed, class_map, input_dir, output_dir, file_path)
+                            content_lines.append(
+                                f'<div class="line-container"><span class="line-number">{line_number}</span>'
+                                f'<span class="code-line">{line_content_processed}</span></div>'
+                            )
+                        line_number += 1
+                    else:
+                        # Block comment continues to next line
+                        escaped_line = escape_html(remaining_content)
+                        comment_content = process_single_line_comments(escaped_line)
+                        comment_content = create_links(comment_content, class_map, input_dir, output_dir, file_path)
+                        content_lines.append(
+                            f'<div class="line-container"><span class="line-number">{line_number}</span>'
+                            f'<span class="code-line"><span class="comment">{comment_content}</span></span></div>'
+                        )
+                        line_number += 1
+                        remaining_content = ""
+                else:
+                    # No block comment, process as normal line
+                    escaped_line = escape_html(remaining_content)
+                    line_content_processed = process_single_line_comments(escaped_line)
+                    line_content_processed = create_links(line_content_processed, class_map, input_dir, output_dir, file_path)
+                    content_lines.append(
+                        f'<div class="line-container"><span class="line-number">{line_number}</span>'
+                        f'<span class="code-line">{line_content_processed}</span></div>'
+                    )
+                    line_number += 1
+                    remaining_content = ""
+
     # Join lines with newlines
     content = '\n'.join(content_lines)
 
