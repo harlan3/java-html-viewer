@@ -83,6 +83,21 @@ def create_class_map(java_files):
             class_map[(package, class_name)] = file_path
     return class_map
 
+def extract_methods(file_path):
+    """Extract method names and their starting line numbers from a Java file."""
+    with open(file_path, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+    methods = []
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith('//') or stripped.startswith('/*') or stripped.startswith('*'):
+            continue
+        match = re.match(r'\s*(?:(?:public|protected|private|static|final|native|synchronized|abstract|transient|volatile)\s+)*([\w<>\[\]]+)\s+(\w+)\s*\([^\)]*\)\s*(?:throws\s+[\w\.,\s]+)?\s*[{;]?', line)
+        if match and match.group(2) != 'if':  # Exclude 'if' statements
+            method_name = match.group(2)
+            methods.append((method_name, i + 1))
+    return methods
+
 def escape_html(text):
     """Escape HTML special characters."""
     return html.escape(text)
@@ -119,8 +134,47 @@ def create_links(content, class_map, input_dir, output_dir, current_file):
     content = re.sub(r'\b[A-Z][A-Za-z0-9_]*\b', replace_class, content)
     return content
 
-def convert_file(file_path, class_map, input_dir, output_dir):
-    """Convert a single Java file to HTML with line numbers."""
+def create_method_links(content, method_map, class_map, input_dir, output_dir, current_file, current_package, current_class):
+    """Add hyperlinks to method references if possible, excluding 'if' statements."""
+    def replace_method(match):
+        method_name = match.group(1)
+        if method_name == 'if':  # Skip 'if' statements
+            return method_name
+        # First, check if in current class
+        key = (current_package, current_class, method_name)
+        if key in method_map:
+            line_num = method_map[key]
+            return f'<a href="#L{line_num}">{method_name}</a>'
+        # Else, find all possible
+        possible = []
+        for (pkg, cls, meth), ln in method_map.items():
+            if meth == method_name:
+                possible.append((pkg, cls, ln))
+        if len(possible) == 1:
+            pkg, cls, ln = possible[0]
+            target_key = (pkg, cls)
+            if target_key in class_map:
+                target_file = class_map[target_key].replace(input_dir, output_dir).replace('.java', '.html')
+                current_html = current_file.replace(input_dir, output_dir).replace('.java', '.html')
+                current_dir = os.path.dirname(current_html)
+                relative_path = os.path.relpath(target_file, current_dir).replace('\\', '/')
+                return f'<a href="{relative_path}#L{ln}">{method_name}</a>'
+        # Else, no link
+        return method_name
+
+    # Link method names only if followed by '(' (for calls and definitions)
+    content = re.sub(r'\b([a-z][A-Za-z0-9_]*)(?=\s*\()', replace_method, content)
+    return content
+
+def convert_file(file_path, class_map, method_map, input_dir, output_dir):
+    """Convert a single Java file to HTML with line numbers, comments, links, and method anchors."""
+    current_class, current_package = get_class_and_package(file_path)
+    # Get method start lines for this class
+    method_starts = set()
+    for (pkg, cls, meth), ln in method_map.items():
+        if pkg == current_package and cls == current_class:
+            method_starts.add(ln)
+
     with open(file_path, 'r', encoding='utf-8') as f:
         lines = f.readlines()
 
@@ -131,43 +185,28 @@ def convert_file(file_path, class_map, input_dir, output_dir):
     for line in lines:
         line_content = line.rstrip('\n')
         remaining_content = line_content
+        parts = []
 
         while remaining_content:
             if in_block_comment:
                 # Look for end of block comment
                 end_match = re.search(r'(.*?)\*/', remaining_content)
                 if end_match:
-                    # Found end of block comment
                     comment_part = end_match.group(1) + '*/'
                     escaped_comment = escape_html(comment_part)
                     comment_content = process_single_line_comments(escaped_comment)
                     comment_content = create_links(comment_content, class_map, input_dir, output_dir, file_path)
-                    content_lines.append(
-                        f'<div class="line-container"><span class="line-number">{line_number}</span>'
-                        f'<span class="code-line"><span class="comment">{comment_content}</span></span></div>'
-                    )
+                    comment_content = create_method_links(comment_content, method_map, class_map, input_dir, output_dir, file_path, current_package, current_class)
+                    parts.append(f'<span class="comment">{comment_content}</span>')
                     in_block_comment = False
-                    # Process remaining content after */
                     remaining_content = remaining_content[end_match.end():]
-                    if remaining_content:
-                        escaped_line = escape_html(remaining_content)
-                        line_content_processed = process_single_line_comments(escaped_line)
-                        line_content_processed = create_links(line_content_processed, class_map, input_dir, output_dir, file_path)
-                        content_lines.append(
-                            f'<div class="line-container"><span class="line-number">{line_number}</span>'
-                            f'<span class="code-line">{line_content_processed}</span></div>'
-                        )
-                    line_number += 1
                 else:
-                    # Entire line is part of block comment
+                    # Entire remaining is part of block comment
                     escaped_line = escape_html(remaining_content)
                     comment_content = process_single_line_comments(escaped_line)
                     comment_content = create_links(comment_content, class_map, input_dir, output_dir, file_path)
-                    content_lines.append(
-                        f'<div class="line-container"><span class="line-number">{line_number}</span>'
-                        f'<span class="code-line"><span class="comment">{comment_content}</span></span></div>'
-                    )
-                    line_number += 1
+                    comment_content = create_method_links(comment_content, method_map, class_map, input_dir, output_dir, file_path, current_package, current_class)
+                    parts.append(f'<span class="comment">{comment_content}</span>')
                     remaining_content = ""
             else:
                 # Look for start of block comment
@@ -176,63 +215,52 @@ def convert_file(file_path, class_map, input_dir, output_dir):
                     # Process content before /*
                     pre_comment = remaining_content[:start_match.start()]
                     if pre_comment:
-                        escaped_pre_comment = escape_html(pre_comment)
-                        pre_comment_content = process_single_line_comments(escaped_pre_comment)
-                        pre_comment_content = create_links(pre_comment_content, class_map, input_dir, output_dir, file_path)
-                        content_lines.append(
-                            f'<div class="line-container"><span class="line-number">{line_number}</span>'
-                            f'<span class="code-line">{pre_comment_content}</span></div>'
-                        )
-                        line_number += 1
+                        escaped_pre = escape_html(pre_comment)
+                        pre_processed = process_single_line_comments(escaped_pre)
+                        pre_processed = create_links(pre_processed, class_map, input_dir, output_dir, file_path)
+                        pre_processed = create_method_links(pre_processed, method_map, class_map, input_dir, output_dir, file_path, current_package, current_class)
+                        parts.append(pre_processed)
                     # Start block comment
-                    in_block_comment = True
                     remaining_content = remaining_content[start_match.start():]
-                    # Check if */ is on the same line
+                    in_block_comment = True
+                    # Check if */ on same line
                     end_match = re.search(r'(.*?)\*/', remaining_content)
                     if end_match:
                         comment_part = end_match.group(1) + '*/'
                         escaped_comment = escape_html(comment_part)
                         comment_content = process_single_line_comments(escaped_comment)
                         comment_content = create_links(comment_content, class_map, input_dir, output_dir, file_path)
-                        content_lines.append(
-                            f'<div class="line-container"><span class="line-number">{line_number}</span>'
-                            f'<span class="code-line"><span class="comment">{comment_content}</span></span></div>'
-                        )
+                        comment_content = create_method_links(comment_content, method_map, class_map, input_dir, output_dir, file_path, current_package, current_class)
+                        parts.append(f'<span class="comment">{comment_content}</span>')
                         in_block_comment = False
                         remaining_content = remaining_content[end_match.end():]
-                        if remaining_content:
-                            escaped_line = escape_html(remaining_content)
-                            line_content_processed = process_single_line_comments(escaped_line)
-                            line_content_processed = create_links(line_content_processed, class_map, input_dir, output_dir, file_path)
-                            content_lines.append(
-                                f'<div class="line-container"><span class="line-number">{line_number}</span>'
-                                f'<span class="code-line">{line_content_processed}</span></div>'
-                            )
-                        line_number += 1
                     else:
-                        # Block comment continues to next line
+                        # Block continues
                         escaped_line = escape_html(remaining_content)
                         comment_content = process_single_line_comments(escaped_line)
                         comment_content = create_links(comment_content, class_map, input_dir, output_dir, file_path)
-                        content_lines.append(
-                            f'<div class="line-container"><span class="line-number">{line_number}</span>'
-                            f'<span class="code-line"><span class="comment">{comment_content}</span></span></div>'
-                        )
-                        line_number += 1
+                        comment_content = create_method_links(comment_content, method_map, class_map, input_dir, output_dir, file_path, current_package, current_class)
+                        parts.append(f'<span class="comment">{comment_content}</span>')
                         remaining_content = ""
                 else:
-                    # No block comment, process as normal line
+                    # No block comment, process whole remaining
                     escaped_line = escape_html(remaining_content)
-                    line_content_processed = process_single_line_comments(escaped_line)
-                    line_content_processed = create_links(line_content_processed, class_map, input_dir, output_dir, file_path)
-                    content_lines.append(
-                        f'<div class="line-container"><span class="line-number">{line_number}</span>'
-                        f'<span class="code-line">{line_content_processed}</span></div>'
-                    )
-                    line_number += 1
+                    line_processed = process_single_line_comments(escaped_line)
+                    line_processed = create_links(line_processed, class_map, input_dir, output_dir, file_path)
+                    line_processed = create_method_links(line_processed, method_map, class_map, input_dir, output_dir, file_path, current_package, current_class)
+                    parts.append(line_processed)
                     remaining_content = ""
 
-    # Join lines with newlines
+        # Build the line
+        if parts:
+            code_line = ''.join(parts)
+            anchor = f'<a name="L{line_number}"></a>' if line_number in method_starts else ''
+            content_lines.append(
+                f'<div class="line-container"><span class="line-number">{line_number}</span><span class="code-line">{anchor}{code_line}</span></div>'
+            )
+        line_number += 1
+
+    # Join lines
     content = '\n'.join(content_lines)
 
     # Create HTML file
@@ -268,12 +296,21 @@ def main():
         print(f"No Java files found in {INPUT_DIR}")
         return
 
-    # Create class map
+    # First pass: Create class map and method map
     class_map = create_class_map(java_files)
-
-    # Convert each Java file to HTML
+    method_map = {}
     for file_path in java_files:
-        convert_file(file_path, class_map, INPUT_DIR, OUTPUT_DIR)
+        class_name, package = get_class_and_package(file_path)
+        if class_name:
+            methods = extract_methods(file_path)
+            for meth, ln in methods:
+                key = (package, class_name, meth)
+                if key not in method_map:  # Take first occurrence if overloads
+                    method_map[key] = ln
+
+    # Second pass: Convert each Java file to HTML
+    for file_path in java_files:
+        convert_file(file_path, class_map, method_map, INPUT_DIR, OUTPUT_DIR)
         print(f"Converted {file_path} to HTML")
 
 if __name__ == "__main__":
