@@ -41,6 +41,7 @@ HTML_TEMPLATE = """
             user-select: none; 
         }}
         .code-line {{ display: inline; }}
+        .empty-line {{ height: 1em; }}
     </style>
 </head>
 <body>
@@ -167,7 +168,7 @@ def create_method_links(content, method_map, class_map, input_dir, output_dir, c
     return content
 
 def convert_file(file_path, class_map, method_map, input_dir, output_dir):
-    """Convert a single Java file to HTML with line numbers, comments, links, and method anchors."""
+    """Convert a single Java file to HTML with line numbers, comments, links, method anchors, and preserved empty lines."""
     current_class, current_package = get_class_and_package(file_path)
     # Get method start lines for this class
     method_starts = set()
@@ -184,6 +185,12 @@ def convert_file(file_path, class_map, method_map, input_dir, output_dir):
 
     for line in lines:
         line_content = line.rstrip('\n')
+        # Check for empty line (only whitespace)
+        if not line_content.strip():
+            content_lines.append(f'<div class="line-container"><span class="line-number">{line_number}</span><span class="code-line empty-line"></span></div>')
+            line_number += 1
+            continue
+
         remaining_content = line_content
         parts = []
 
