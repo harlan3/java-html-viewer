@@ -59,29 +59,39 @@ def find_java_files(directory):
                 java_files.append(os.path.join(root, file))
     return java_files
 
-def get_class_and_package(file_path):
-    """Extract the class name and package from a Java file."""
+def get_primary_type_and_package(file_path):
+    """Extract the primary type name (class, interface, enum) and package from a Java file."""
     package = ""
-    class_name = None
+    primary_type = None
     with open(file_path, 'r', encoding='utf-8') as f:
         content = f.read()
         # Extract package declaration
         package_match = re.search(r'^\s*package\s+([a-zA-Z0-9_.]+)\s*;', content, re.MULTILINE)
         if package_match:
             package = package_match.group(1)
-        # Extract class name
-        class_match = re.search(r'\bclass\s+([A-Za-z_][A-Za-z0-9_]*)\b', content)
-        if class_match:
-            class_name = class_match.group(1)
-    return class_name, package
+        # Extract primary type name (look for public first, then any)
+        type_match = re.search(r'\bpublic\s+(?:class|interface|enum|record|@interface)\s+([A-Za-z_][A-Za-z0-9_]*)\b', content)
+        if not type_match:
+            type_match = re.search(r'\b(?:class|interface|enum|record|@interface)\s+([A-Za-z_][A-Za-z0-9_]*)\b', content)
+        if type_match:
+            primary_type = type_match.group(1)
+    return primary_type, package
+
+def extract_all_types(content):
+    """Extract all type names (classes, interfaces, enums, records, annotations) from the content."""
+    return re.findall(r'\b(?:class|interface|enum|record|@interface)\s+([A-Za-z_][A-Za-z0-9_]*)\b', content)
 
 def create_class_map(java_files):
-    """Create a map of (package, class_name) to their file paths."""
+    """Create a map of (package, type_name) to their file paths for all types."""
     class_map = {}
     for file_path in java_files:
-        class_name, package = get_class_and_package(file_path)
-        if class_name:
-            class_map[(package, class_name)] = file_path
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        package_match = re.search(r'^\s*package\s+([a-zA-Z0-9_.]+)\s*;', content, re.MULTILINE)
+        package = package_match.group(1) if package_match else ""
+        type_names = extract_all_types(content)
+        for type_name in type_names:
+            class_map[(package, type_name)] = file_path
     return class_map
 
 def extract_methods(file_path):
@@ -108,41 +118,41 @@ def process_single_line_comments(line):
     return re.sub(r'(//[^\n]*)', r'<span class="comment">\1</span>', line)
 
 def create_links(content, class_map, input_dir, output_dir, current_file):
-    """Add hyperlinks to class references with correct relative paths, considering packages."""
-    current_package = get_class_and_package(current_file)[1]
+    """Add hyperlinks to type references (classes, interfaces, enums, exceptions) with correct relative paths, considering packages."""
+    current_package = get_primary_type_and_package(current_file)[1]
 
     def replace_class(match):
-        class_name = match.group(0)
-        # Try to resolve the class in the current package first
-        key = (current_package, class_name)
+        type_name = match.group(0)
+        # Try to resolve the type in the current package first
+        key = (current_package, type_name)
         if key not in class_map:
             # If not found in current package, check other packages
             for (pkg, cls), file_path in class_map.items():
-                if cls == class_name:
+                if cls == type_name:
                     key = (pkg, cls)
                     break
             else:
-                return class_name  # No match found, return original text
+                return type_name  # No match found, return original text
 
         # Get the target HTML file path
         target_file = class_map[key].replace(input_dir, output_dir).replace('.java', '.html')
         # Calculate relative path from the current HTML file to the target HTML file
         current_dir = os.path.dirname(current_file.replace(input_dir, output_dir).replace('.java', '.html'))
         relative_path = os.path.relpath(target_file, current_dir).replace('\\', '/')
-        return f'<a href="{relative_path}">{class_name}</a>'
+        return f'<a href="{relative_path}">{type_name}</a>'
 
-    # Link class names (word boundaries to avoid partial matches)
+    # Link type names (word boundaries to avoid partial matches)
     content = re.sub(r'\b[A-Z][A-Za-z0-9_]*\b', replace_class, content)
     return content
 
-def create_method_links(content, method_map, class_map, input_dir, output_dir, current_file, current_package, current_class):
+def create_method_links(content, method_map, class_map, input_dir, output_dir, current_file, current_package, current_type):
     """Add hyperlinks to method references if possible, excluding 'if' statements."""
     def replace_method(match):
         method_name = match.group(1)
         if method_name == 'if':  # Skip 'if' statements
             return method_name
         # First, check if in current class
-        key = (current_package, current_class, method_name)
+        key = (current_package, current_type, method_name)
         if key in method_map:
             line_num = method_map[key]
             return f'<a href="#L{line_num}">{method_name}</a>'
@@ -169,11 +179,11 @@ def create_method_links(content, method_map, class_map, input_dir, output_dir, c
 
 def convert_file(file_path, class_map, method_map, input_dir, output_dir):
     """Convert a single Java file to HTML with line numbers, comments, links, method anchors, and preserved empty lines."""
-    current_class, current_package = get_class_and_package(file_path)
+    current_type, current_package = get_primary_type_and_package(file_path)
     # Get method start lines for this class
     method_starts = set()
     for (pkg, cls, meth), ln in method_map.items():
-        if pkg == current_package and cls == current_class:
+        if pkg == current_package and cls == current_type:
             method_starts.add(ln)
 
     with open(file_path, 'r', encoding='utf-8') as f:
@@ -203,7 +213,7 @@ def convert_file(file_path, class_map, method_map, input_dir, output_dir):
                     escaped_comment = escape_html(comment_part)
                     comment_content = process_single_line_comments(escaped_comment)
                     comment_content = create_links(comment_content, class_map, input_dir, output_dir, file_path)
-                    comment_content = create_method_links(comment_content, method_map, class_map, input_dir, output_dir, file_path, current_package, current_class)
+                    comment_content = create_method_links(comment_content, method_map, class_map, input_dir, output_dir, file_path, current_package, current_type)
                     parts.append(f'<span class="comment">{comment_content}</span>')
                     in_block_comment = False
                     remaining_content = remaining_content[end_match.end():]
@@ -212,7 +222,7 @@ def convert_file(file_path, class_map, method_map, input_dir, output_dir):
                     escaped_line = escape_html(remaining_content)
                     comment_content = process_single_line_comments(escaped_line)
                     comment_content = create_links(comment_content, class_map, input_dir, output_dir, file_path)
-                    comment_content = create_method_links(comment_content, method_map, class_map, input_dir, output_dir, file_path, current_package, current_class)
+                    comment_content = create_method_links(comment_content, method_map, class_map, input_dir, output_dir, file_path, current_package, current_type)
                     parts.append(f'<span class="comment">{comment_content}</span>')
                     remaining_content = ""
             else:
@@ -225,7 +235,7 @@ def convert_file(file_path, class_map, method_map, input_dir, output_dir):
                         escaped_pre = escape_html(pre_comment)
                         pre_processed = process_single_line_comments(escaped_pre)
                         pre_processed = create_links(pre_processed, class_map, input_dir, output_dir, file_path)
-                        pre_processed = create_method_links(pre_processed, method_map, class_map, input_dir, output_dir, file_path, current_package, current_class)
+                        pre_processed = create_method_links(pre_processed, method_map, class_map, input_dir, output_dir, file_path, current_package, current_type)
                         parts.append(pre_processed)
                     # Start block comment
                     remaining_content = remaining_content[start_match.start():]
@@ -237,7 +247,7 @@ def convert_file(file_path, class_map, method_map, input_dir, output_dir):
                         escaped_comment = escape_html(comment_part)
                         comment_content = process_single_line_comments(escaped_comment)
                         comment_content = create_links(comment_content, class_map, input_dir, output_dir, file_path)
-                        comment_content = create_method_links(comment_content, method_map, class_map, input_dir, output_dir, file_path, current_package, current_class)
+                        comment_content = create_method_links(comment_content, method_map, class_map, input_dir, output_dir, file_path, current_package, current_type)
                         parts.append(f'<span class="comment">{comment_content}</span>')
                         in_block_comment = False
                         remaining_content = remaining_content[end_match.end():]
@@ -246,7 +256,7 @@ def convert_file(file_path, class_map, method_map, input_dir, output_dir):
                         escaped_line = escape_html(remaining_content)
                         comment_content = process_single_line_comments(escaped_line)
                         comment_content = create_links(comment_content, class_map, input_dir, output_dir, file_path)
-                        comment_content = create_method_links(comment_content, method_map, class_map, input_dir, output_dir, file_path, current_package, current_class)
+                        comment_content = create_method_links(comment_content, method_map, class_map, input_dir, output_dir, file_path, current_package, current_type)
                         parts.append(f'<span class="comment">{comment_content}</span>')
                         remaining_content = ""
                 else:
@@ -254,7 +264,7 @@ def convert_file(file_path, class_map, method_map, input_dir, output_dir):
                     escaped_line = escape_html(remaining_content)
                     line_processed = process_single_line_comments(escaped_line)
                     line_processed = create_links(line_processed, class_map, input_dir, output_dir, file_path)
-                    line_processed = create_method_links(line_processed, method_map, class_map, input_dir, output_dir, file_path, current_package, current_class)
+                    line_processed = create_method_links(line_processed, method_map, class_map, input_dir, output_dir, file_path, current_package, current_type)
                     parts.append(line_processed)
                     remaining_content = ""
 
@@ -307,11 +317,11 @@ def main():
     class_map = create_class_map(java_files)
     method_map = {}
     for file_path in java_files:
-        class_name, package = get_class_and_package(file_path)
-        if class_name:
+        primary_type, package = get_primary_type_and_package(file_path)
+        if primary_type:
             methods = extract_methods(file_path)
             for meth, ln in methods:
-                key = (package, class_name, meth)
+                key = (package, primary_type, meth)
                 if key not in method_map:  # Take first occurrence if overloads
                     method_map[key] = ln
 
