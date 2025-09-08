@@ -3,6 +3,7 @@ import re
 from pathlib import Path
 import html
 import sys
+import shutil
 
 # Configuration
 #INPUT_DIR = "C:\\Users\harla\\java2html\\src"  # Directory containing Java source files
@@ -50,14 +51,17 @@ HTML_TEMPLATE = """
 </html>
 """
 
-def find_java_files(directory):
-    """Find all .java files in the directory and its subdirectories."""
+def find_files(directory):
+    """Find all .java, .xml, .json, and .dat files in the directory and its subdirectories."""
     java_files = []
+    pass_through_files = []
     for root, _, files in os.walk(directory):
         for file in files:
             if file.endswith(".java"):
                 java_files.append(os.path.join(root, file))
-    return java_files
+            elif file.endswith((".xml", ".json", ".dat")):
+                pass_through_files.append(os.path.join(root, file))
+    return java_files, pass_through_files
 
 def get_primary_type_and_package(file_path):
     """Extract the primary type name (class, interface, enum) and package from a Java file."""
@@ -296,6 +300,14 @@ def convert_file(file_path, class_map, method_map, input_dir, output_dir):
     with open(output_file, 'w', encoding='utf-8') as f:
         f.write(html_content)
 
+def copy_pass_through_files(pass_through_files, input_dir, output_dir):
+    """Copy .xml, .json, and .dat files to the output directory without modification."""
+    for file_path in pass_through_files:
+        output_file = file_path.replace(input_dir, output_dir)
+        os.makedirs(os.path.dirname(output_file), exist_ok=True)
+        shutil.copy2(file_path, output_file)
+        print(f"Copied {file_path} to {output_file}")
+
 def main():
     
     if len(sys.argv) < 2:
@@ -303,14 +315,14 @@ def main():
         return
     INPUT_DIR = sys.argv[1]
     
-    """Main function to process all Java files."""
+    """Main function to process all Java files and copy pass-through files."""
     # Create output directory
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    # Find all Java files
-    java_files = find_java_files(INPUT_DIR)
-    if not java_files:
-        print(f"No Java files found in {INPUT_DIR}")
+    # Find all Java and pass-through files
+    java_files, pass_through_files = find_files(INPUT_DIR)
+    if not java_files and not pass_through_files:
+        print(f"No Java, XML, JSON, or DAT files found in {INPUT_DIR}")
         return
 
     # First pass: Create class map and method map
@@ -329,6 +341,9 @@ def main():
     for file_path in java_files:
         convert_file(file_path, class_map, method_map, INPUT_DIR, OUTPUT_DIR)
         print(f"Converted {file_path} to HTML")
+
+    # Copy pass-through files (.xml, .json, .dat)
+    copy_pass_through_files(pass_through_files, INPUT_DIR, OUTPUT_DIR)
 
 if __name__ == "__main__":
     main()

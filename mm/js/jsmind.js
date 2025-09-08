@@ -2498,8 +2498,14 @@
                 }
             }
             d.setAttribute('nodeid', node.id);
-            d.setAttribute('onclick', 'loadInFrame("' + node.link + '");');
-
+            
+            if (node.link !== undefined) {
+            	if (node.link.endsWith(".xml"))
+					d.setAttribute('onclick', 'loadXmlInFrame("' + node.link + '");');
+				else
+					d.setAttribute('onclick', 'loadJavaInFrame("' + node.link + '");');
+			}
+            
             d.style.visibility = 'hidden';
             this._reset_node_custom_style(d, node.data);
 

@@ -64,12 +64,30 @@
 </head>
 <body>  
 
+<script type="text/javascript" src="./js/vkbeautify.js"></script>
 <script type="text/javascript" src="./js/jsmind.js"></script>
 <script type="text/javascript" src="./js/jsmind.screenshot.js"></script>
 <script type="text/javascript">
 
-    function loadInFrame(page) {
+    function loadJavaInFrame(page) {
       document.getElementById('source').src = page;
+    }
+    
+    function openInNewFrame(link) {
+      window.open(link, "_blank");
+    }
+    
+    function loadXmlInFrame(link) {
+      fetch(link)
+         .then(response => response.text())
+         .then(text => {	   
+           const formatted = vkbeautify.xml(text);
+           const iframe = document.getElementById("source");
+		   const pre = iframe.contentDocument.createElement("pre");
+		   pre.textContent = formatted;
+		   iframe.contentDocument.body.innerHTML = "";
+		   iframe.contentDocument.body.appendChild(pre);
+      })
     }
     
     async function loadAndProcessData(url) {
@@ -88,7 +106,6 @@
     var _jm = null;
     
     loadAndProcessData('http://127.0.0.1:8000/Content.mm');
-    loadInFrame('http://127.0.0.1:8000/src_html/com/src2html/java_parser/JavaParser.html');
         
     function open_empty(){
         var options = {
